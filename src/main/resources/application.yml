@@ -10,7 +10,12 @@ spring:
     url: jdbc:mysql://localhost:3306/h_smartpic
     username: root
     password: 1234
-
+  profiles:
+    active: local
+# 开放上传文件最大大小
+  servlet:
+    multipart:
+      max-file-size: 10MB
 mybatis-plus:
   configuration:
     # MyBatis 配置
@@ -34,3 +39,11 @@ knife4j:
         api-rule: package
         api-rule-resources:
           - com.hsc.hsmartpicbackend.controller
+# 对象存储配置(需要从腾讯云控制台获取)
+#cos:
+#  client:
+#    host: xxx
+#    secretId: xxx
+#    secretKey: xxx
+#    region: xxx
+#    bucket: xxx
