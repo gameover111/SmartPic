@@ -11,12 +11,10 @@ import com.hsc.hsmartpicbackend.exception.BusinessException;
 import com.hsc.hsmartpicbackend.exception.ErrorCode;
 import com.hsc.hsmartpicbackend.exception.ThrowUtils;
 import com.hsc.hsmartpicbackend.manager.CosManager;
-import com.hsc.hsmartpicbackend.model.dto.picture.PictureEditRequest;
-import com.hsc.hsmartpicbackend.model.dto.picture.PictureQueryRequest;
-import com.hsc.hsmartpicbackend.model.dto.picture.PictureUpdateRequest;
-import com.hsc.hsmartpicbackend.model.dto.picture.PictureUploadRequest;
+import com.hsc.hsmartpicbackend.model.dto.picture.*;
 import com.hsc.hsmartpicbackend.model.entity.Picture;
 import com.hsc.hsmartpicbackend.model.entity.User;
+import com.hsc.hsmartpicbackend.model.enums.PictureReviewStatusEnum;
 import com.hsc.hsmartpicbackend.model.vo.PictureTagCategory;
 import com.hsc.hsmartpicbackend.model.vo.PictureVO;
 import com.hsc.hsmartpicbackend.service.PictureService;
@@ -56,7 +54,7 @@ public class PictureController {
      * @return 图片VO
      */
     @PostMapping("/upload")
-    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+//    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
     public BaseResponse<PictureVO> uploadPicture(
             @RequestPart("file") MultipartFile multipartFile,
             PictureUploadRequest pictureUploadRequest,
@@ -66,6 +64,23 @@ public class PictureController {
         return ResultUtils.success(pictureVO);
     }
 
+    /**
+     * 上传图片（url上传）
+     *
+     * @param pictureUploadRequest 图片上传请求
+     * @param request              HttpServletRequest
+     * @return 图片VO
+     */
+    @PostMapping("/upload/url")
+//    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    public BaseResponse<PictureVO> uploadPictureByUrl(
+            @RequestBody PictureUploadRequest pictureUploadRequest,
+            HttpServletRequest request) {
+        User loginUser = userService.getLoginUser(request);
+        String fileUrl = pictureUploadRequest.getFileUrl();
+        PictureVO pictureVO = pictureService.uploadPicture(fileUrl, pictureUploadRequest, loginUser);
+        return ResultUtils.success(pictureVO);
+    }
     // ==================== 删除图片 ====================
     /**
      * 删除图片（仅图片所有者或管理员可操作）
@@ -102,11 +117,13 @@ public class PictureController {
     /**
      * 更新图片信息（仅管理员可用）
      * @param pictureUpdateRequest 包含图片更新字段的请求体
+     * @param request              Http请求对象，用于获取当前登录用户
      * @return 更新成功返回true
      */
     @PostMapping("/update")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)   // 强制要求管理员权限
-    public BaseResponse<Boolean> updatePicture(@RequestBody PictureUpdateRequest pictureUpdateRequest) {
+    public BaseResponse<Boolean> updatePicture(@RequestBody PictureUpdateRequest pictureUpdateRequest,
+                                               HttpServletRequest request) {
         // 1. 参数校验：请求体及图片id合法性
         if (pictureUpdateRequest == null || pictureUpdateRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
@@ -126,6 +143,9 @@ public class PictureController {
         long id = pictureUpdateRequest.getId();
         Picture oldPicture = pictureService.getById(id);
         ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR);
+        //填充审核参数
+        User loginUser = userService.getLoginUser(request);
+        pictureService.fillReviewParams(oldPicture, loginUser);
 
         // 6. 执行更新操作
         boolean result = pictureService.updateById(picture);
@@ -206,7 +226,8 @@ public class PictureController {
 
         // 限制每页最大数量，防止恶意请求
         ThrowUtils.throwIf(size > 20, ErrorCode.PARAMS_ERROR);
-
+        // 普通用户默认只能看到审核通过的数据
+        pictureQueryRequest.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
         // 分页查询原始实体
         Page<Picture> picturePage = pictureService.page(new Page<>(current, size),
                 pictureService.getQueryWrapper(pictureQueryRequest));
@@ -244,7 +265,8 @@ public class PictureController {
 
         // 6. 获取当前登录用户
         User loginUser = userService.getLoginUser(request);
-
+        //填充审核参数
+        pictureService.fillReviewParams(picture, loginUser);
         // 7. 查询原始图片是否存在
         long id = pictureEditRequest.getId();
         Picture oldPicture = pictureService.getById(id);
@@ -274,4 +296,37 @@ public class PictureController {
         return ResultUtils.success(pictureTagCategory);
     }
 
+    /**
+     * 审核图片（仅管理员可见）
+     *
+     * @param pictureReviewRequest 审核请求（包含图片id、审核状态、审核消息）
+     * @param request              Http请求，用于获取当前登录用户
+     * @return 审核成功返回true
+     */
+    @PostMapping("/review")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    public BaseResponse<Boolean> doPictureReview(@RequestBody PictureReviewRequest pictureReviewRequest,
+                                                 HttpServletRequest request) {
+        ThrowUtils.throwIf(pictureReviewRequest == null, ErrorCode.PARAMS_ERROR);
+        User loginUser = userService.getLoginUser(request);
+        pictureService.doPictureReview(pictureReviewRequest, loginUser);
+        return ResultUtils.success(true);
+    }
+
+    /**
+     * 批量抓取并创建图片
+     *
+     * @param pictureUploadByBatchRequest 批量上传请求（包含图片id、审核状态）
+     * @param request                     Http请求，用于获取当前登录用户
+     * @return 审核成功返回true
+     */
+    @PostMapping("/upload/batch")
+    @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
+    public BaseResponse<Integer> uploadPictureByBatch(@RequestBody PictureUploadByBatchRequest pictureUploadByBatchRequest,
+                                                      HttpServletRequest request) {
+        ThrowUtils.throwIf(pictureUploadByBatchRequest == null, ErrorCode.PARAMS_ERROR);
+        User loginUser = userService.getLoginUser(request);
+        Integer count = pictureService.uploadPictureByBatch(pictureUploadByBatchRequest, loginUser);
+        return ResultUtils.success(count);
+    }
 }
