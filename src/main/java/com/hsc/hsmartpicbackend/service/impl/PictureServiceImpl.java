@@ -10,6 +10,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hsc.hsmartpicbackend.exception.BusinessException;
 import com.hsc.hsmartpicbackend.exception.ErrorCode;
 import com.hsc.hsmartpicbackend.exception.ThrowUtils;
+import com.hsc.hsmartpicbackend.manager.CosManager;
 import com.hsc.hsmartpicbackend.manager.FileManager;
 import com.hsc.hsmartpicbackend.manager.upload.FilePictureUpload;
 import com.hsc.hsmartpicbackend.manager.upload.PictureUploadTemplate;
@@ -33,6 +34,8 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 import org.springframework.beans.BeanUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -66,6 +69,10 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
 
     @Resource
     private UrlPictureUpload urlPictureUpload;
+
+    @Resource
+    private CosManager cosManager;
+
     /**
      * 校验图片
      * @param picture 图片
@@ -105,8 +112,9 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
             pictureId = pictureUploadRequest.getId();
         }
         // 如果是更新，检查图片是否存在
+        Picture oldPicture = null;
         if (pictureId != null) {
-            Picture oldPicture = this.getById(pictureId);
+            oldPicture = this.getById(pictureId);
 //            boolean exists = this.lambdaQuery()
 //                    .eq(Picture::getId, pictureId)
 //                    .exists();
@@ -130,7 +138,7 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         UploadPictureResult uploadPictureResult = pictureUploadTemplate.uploadPicture(inputSource, uploadPathPrefix);
         //构造要入库的图片信息
         Picture picture = new Picture();
-
+        //保存批量上传图片时，需要设置图片分类和标签信息
         if (pictureUploadRequest != null) {
             if (StrUtil.isNotBlank(pictureUploadRequest.getCategory())) {
                 picture.setCategory(pictureUploadRequest.getCategory());
@@ -139,8 +147,10 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
                 picture.setTags(JSONUtil.toJsonStr(pictureUploadRequest.getTags()));
             }
         }
-
+        //设置压缩后的原始图片地址
         picture.setUrl(uploadPictureResult.getUrl());
+        //设置缩略图地址
+        picture.setThumbnailUrl(uploadPictureResult.getThumbnailUrl());
         //支持外层传递图片名称
         String picName = uploadPictureResult.getPicName();
         if (pictureUploadRequest != null && StrUtil.isNotBlank(pictureUploadRequest.getPicName())) {
@@ -164,6 +174,10 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
             picture.setEditTime(new Date());
         }
         boolean result = this.saveOrUpdate(picture);
+
+        //异步清理旧图片文件--可选,根据业务需求是否清理
+//        this.clearPictureFile(oldPicture);
+
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "图片上传失败");
         return PictureVO.objToVo(picture);
     }
@@ -419,6 +433,33 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
             }
         }
         return uploadCount;
+    }
+
+    /**
+     * 清理图片文件
+     *
+     * @param oldPicture 旧图片
+     */
+    //异步执行
+    @Async
+    @Override
+    public void clearPictureFile(Picture oldPicture) {
+        //判断该图片是否被多条记录使用
+        String pictureUrl = oldPicture.getUrl();
+        long count = this.lambdaQuery()
+                .eq(Picture::getUrl, pictureUrl)
+                .count();
+        //如果被多条记录使用，不删除
+        if (count > 1) {
+            return;
+        }
+        //删除图片文件
+        cosManager.deleteObject(oldPicture.getUrl());
+        //删除对应的缩略图文件
+        String thumbnailUrl = oldPicture.getThumbnailUrl();
+        if (StrUtil.isNotBlank(thumbnailUrl)) {
+            cosManager.deleteObject(thumbnailUrl);
+        }
     }
 
 }

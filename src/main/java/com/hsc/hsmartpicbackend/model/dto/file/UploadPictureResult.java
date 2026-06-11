@@ -3,9 +3,10 @@ package com.hsc.hsmartpicbackend.model.dto.file;
 import lombok.Data;
 
 @Data
-public class UploadPictureResult {  
-  
-      
+public class UploadPictureResult {
+
+    private String thumbnailUrl;
+
     private String url;  
   
       

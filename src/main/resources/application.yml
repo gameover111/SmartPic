@@ -2,16 +2,33 @@ server:
   port: 9123
   servlet:
     context-path: /api
+#    cookie 过期时间设置30天后过期
+    session:
+      cookie:
+        max-age: 2592000
 spring:
   application:
     name: h-smartpic-backend
+  profiles:
+    active: local
+  #  数据库 配置
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://localhost:3306/h_smartpic
     username: root
     password: 1234
-  profiles:
-    active: local
+  #  Redis 配置
+  redis:
+    host: localhost
+    port: 6379
+    password: 123456
+    database: 0
+    timeout: 60s
+  #  session 配置
+  session:
+    store-type: redis
+    #    redis 过期时间设置30天后过期
+    timeout: 2592000
 # 开放上传文件最大大小
   servlet:
     multipart:
