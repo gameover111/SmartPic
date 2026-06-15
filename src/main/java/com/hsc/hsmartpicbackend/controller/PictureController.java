@@ -17,11 +17,13 @@ import com.hsc.hsmartpicbackend.manager.CosManager;
 import com.hsc.hsmartpicbackend.manager.MultilevelCacheManager;
 import com.hsc.hsmartpicbackend.model.dto.picture.*;
 import com.hsc.hsmartpicbackend.model.entity.Picture;
+import com.hsc.hsmartpicbackend.model.entity.Space;
 import com.hsc.hsmartpicbackend.model.entity.User;
 import com.hsc.hsmartpicbackend.model.enums.PictureReviewStatusEnum;
 import com.hsc.hsmartpicbackend.model.vo.PictureTagCategory;
 import com.hsc.hsmartpicbackend.model.vo.PictureVO;
 import com.hsc.hsmartpicbackend.service.PictureService;
+import com.hsc.hsmartpicbackend.service.SpaceService;
 import com.hsc.hsmartpicbackend.service.UserService;
 import com.qcloud.cos.model.COSObject;
 import com.qcloud.cos.model.COSObjectInputStream;
@@ -65,6 +67,10 @@ public class PictureController {
 //                    .build();
     @Resource
     private MultilevelCacheManager multilevelCacheManager;
+
+    @Resource
+    private SpaceService spaceService;
+
     /**
      * 上传图片
      * @param multipartFile 图片文件
@@ -115,23 +121,25 @@ public class PictureController {
         }
         // 2. 获取当前登录用户
         User loginUser = userService.getLoginUser(request);
-        long id = deleteRequest.getId();
+//        long id = deleteRequest.getId();
+//
+//        // 3. 查询待删除的图片是否存在
+//        Picture oldPicture = pictureService.getById(id);
+//        ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR);
+//
+//        // 4. 权限校验：只有图片的创建者或管理员才能删除
+//        if (!oldPicture.getUserId().equals(loginUser.getId()) && !userService.isAdmin(loginUser)) {
+//            throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
+//        }
+//
+//        // 5. 执行删除操作
+//        boolean result = pictureService.removeById(id);
+//        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+//
+//        // 6. 异步清理图片文件
+//        pictureService.clearPictureFile(oldPicture);
 
-        // 3. 查询待删除的图片是否存在
-        Picture oldPicture = pictureService.getById(id);
-        ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR);
-
-        // 4. 权限校验：只有图片的创建者或管理员才能删除
-        if (!oldPicture.getUserId().equals(loginUser.getId()) && !userService.isAdmin(loginUser)) {
-            throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
-        }
-
-        // 5. 执行删除操作
-        boolean result = pictureService.removeById(id);
-        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
-
-        // 6. 异步清理图片文件
-        pictureService.clearPictureFile(oldPicture);
+        pictureService.deletePicture(deleteRequest.getId(), loginUser);
         return ResultUtils.success(true);
     }
 
@@ -209,7 +217,12 @@ public class PictureController {
         // 查询原始图片
         Picture picture = pictureService.getById(id);
         ThrowUtils.throwIf(picture == null, ErrorCode.NOT_FOUND_ERROR);
-
+        // 空间权限校验
+        Long spaceId = picture.getSpaceId();
+        if (spaceId != null) {
+            User loginUser = userService.getLoginUser(request);
+            pictureService.checkPictureAuth(loginUser, picture);
+        }
         // 转换为VO对象（可能包含用户信息、是否被当前用户点赞等）
         return ResultUtils.success(pictureService.getPictureVO(picture, request));
     }
@@ -248,8 +261,24 @@ public class PictureController {
 
         // 限制每页最大数量，防止恶意请求
         ThrowUtils.throwIf(size > 20, ErrorCode.PARAMS_ERROR);
-        // 普通用户默认只能看到审核通过的数据
-        pictureQueryRequest.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
+
+        // 空间权限校验
+        Long spaceId = pictureQueryRequest.getSpaceId();
+        if (spaceId == null) {
+            // 公开图库
+            // 普通用户默认只能看到审核通过的数据
+            pictureQueryRequest.setReviewStatus(PictureReviewStatusEnum.PASS.getValue());
+            pictureQueryRequest.setNullSpaceId(true);
+        } else {
+            // 私有空间
+            User loginUser = userService.getLoginUser(request);
+            Space space = spaceService.getById(spaceId);
+            ThrowUtils.throwIf(space == null, ErrorCode.NOT_FOUND_ERROR, "空间不存在");
+            if (!loginUser.getId().equals(space.getUserId())) {
+                throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "没有空间权限");
+            }
+        }
+
         // 分页查询原始实体
         Page<Picture> picturePage = pictureService.page(new Page<>(current, size),
                 pictureService.getQueryWrapper(pictureQueryRequest));
@@ -449,37 +478,9 @@ public class PictureController {
         if (pictureEditRequest == null || pictureEditRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
         }
-
-        // 2. 拷贝属性到实体对象
-        Picture picture = new Picture();
-        BeanUtils.copyProperties(pictureEditRequest, picture);
-
-        // 3. 特殊处理：标签字段（List -> JSON字符串）
-        picture.setTags(JSONUtil.toJsonStr(pictureEditRequest.getTags()));
-
-        // 4. 自动设置编辑时间为当前时间
-        picture.setEditTime(new Date());
-
-        // 5. 业务校验（图片名称、分类等）
-        pictureService.validPicture(picture);
-
-        // 6. 获取当前登录用户
         User loginUser = userService.getLoginUser(request);
-        //填充审核参数
-        pictureService.fillReviewParams(picture, loginUser);
-        // 7. 查询原始图片是否存在
-        long id = pictureEditRequest.getId();
-        Picture oldPicture = pictureService.getById(id);
-        ThrowUtils.throwIf(oldPicture == null, ErrorCode.NOT_FOUND_ERROR);
+        pictureService.editPicture(pictureEditRequest, loginUser);
 
-        // 8. 权限校验：只有图片所有者或管理员才能编辑
-        if (!oldPicture.getUserId().equals(loginUser.getId()) && !userService.isAdmin(loginUser)) {
-            throw new BusinessException(ErrorCode.NO_AUTH_ERROR);
-        }
-
-        // 9. 执行更新操作
-        boolean result = pictureService.updateById(picture);
-        ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
         return ResultUtils.success(true);
     }
     /**

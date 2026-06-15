@@ -21,6 +21,12 @@ public class PictureUploadRequest implements Serializable {
      */
     private String picName;
 
+
+    /**
+     * 空间 id
+     */
+    private Long spaceId;
+
     private String category;        // 拓展：统一分类
     private List<String> tags;      // 拓展：统一标签列表
 
