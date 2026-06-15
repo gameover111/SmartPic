@@ -3,7 +3,7 @@ package com.hsc.hsmartpicbackend.model.dto.file;
 import lombok.Data;
 
 @Data
-public class UploadPictureResult {
+public class UploadPictureResult{
 
     private String thumbnailUrl;
 
@@ -25,6 +25,9 @@ public class UploadPictureResult {
     private Double picScale;  
   
       
-    private String picFormat;  
-  
+    private String picFormat;
+    /**
+     * 图片主色调
+     */
+    private String picColor;
 }

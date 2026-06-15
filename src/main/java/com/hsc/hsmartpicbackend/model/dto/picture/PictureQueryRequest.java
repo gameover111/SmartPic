@@ -69,6 +69,15 @@ public class PictureQueryRequest extends PageRequest implements Serializable {
      */
     private Date reviewTime;
 
+    /*
+     * 开始编辑时间
+     */
+    private Date startEditTime;
+
+    /*
+     * 结束编辑时间
+     */
+    private Date endEditTime;
     /**
      * 空间 id
      */
