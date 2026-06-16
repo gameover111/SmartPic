@@ -7,6 +7,9 @@ import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.hsc.hsmartpicbackend.api.aliyunai.AliYunAiApi;
+import com.hsc.hsmartpicbackend.api.aliyunai.model.CreateOutPaintingTaskRequest;
+import com.hsc.hsmartpicbackend.api.aliyunai.model.CreateOutPaintingTaskResponse;
 import com.hsc.hsmartpicbackend.exception.BusinessException;
 import com.hsc.hsmartpicbackend.exception.ErrorCode;
 import com.hsc.hsmartpicbackend.exception.ThrowUtils;
@@ -21,6 +24,7 @@ import com.hsc.hsmartpicbackend.model.entity.Picture;
 import com.hsc.hsmartpicbackend.model.entity.Space;
 import com.hsc.hsmartpicbackend.model.entity.User;
 import com.hsc.hsmartpicbackend.model.enums.PictureReviewStatusEnum;
+import com.hsc.hsmartpicbackend.model.enums.UserRoleEnum;
 import com.hsc.hsmartpicbackend.model.vo.PictureVO;
 import com.hsc.hsmartpicbackend.model.vo.UserVO;
 import com.hsc.hsmartpicbackend.service.PictureService;
@@ -30,6 +34,7 @@ import com.hsc.hsmartpicbackend.service.UserService;
 import com.hsc.hsmartpicbackend.utils.ColorSimilarUtils;
 import com.hsc.hsmartpicbackend.utils.ColorTransformUtils;
 import lombok.extern.slf4j.Slf4j;
+import lombok.var;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -79,6 +84,9 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
 
     @Resource
     private TransactionTemplate transactionTemplate;
+
+    @Resource
+    private AliYunAiApi aliYunAiApi;
     /**
      * 校验图片
      * @param picture 图片
@@ -662,20 +670,58 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         String category = pictureEditByBatchRequest.getCategory();
         List<String> tags = pictureEditByBatchRequest.getTags();
         ThrowUtils.throwIf(CollUtil.isEmpty(pictureIdList), ErrorCode.PARAMS_ERROR);
-        ThrowUtils.throwIf(spaceId == null, ErrorCode.PARAMS_ERROR);
         ThrowUtils.throwIf(loginUser == null, ErrorCode.NO_AUTH_ERROR);
-        // 2. 校验空间权限
-        Space space = spaceService.getById(spaceId);
-        ThrowUtils.throwIf(space == null, ErrorCode.NOT_FOUND_ERROR, "空间不存在");
-        if (!space.getUserId().equals(loginUser.getId())) {
-            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "没有空间访问权限");
+
+//        ThrowUtils.throwIf(spaceId == null, ErrorCode.PARAMS_ERROR);
+//
+//        // 2. 校验空间权限
+//        Space space = spaceService.getById(spaceId);
+//        ThrowUtils.throwIf(space == null, ErrorCode.NOT_FOUND_ERROR, "空间不存在");
+//        if (!space.getUserId().equals(loginUser.getId())) {
+//            throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "没有空间访问权限");
+//        }
+//        // 3. 查询指定图片（仅选择需要的字段）
+//        List<Picture> pictureList = this.lambdaQuery()
+//                .select(Picture::getId, Picture::getSpaceId)
+//                .eq(Picture::getSpaceId, spaceId)
+//                .in(Picture::getId, pictureIdList)
+//                .list();
+
+        // ==================== 【关键改动 1：分场景校验权限与空间】====================
+        if (spaceId == null) {
+            // 场景 A：公共图库批量编辑 -> 必须要求系统管理员权限
+            // 假设你的 UserConstant 中有 ROLE_ADMIN 或类似标志，请根据项目实际调整
+            if (!UserRoleEnum.ADMIN.getValue().equals(loginUser.getUserRole())) {
+                throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "只有系统管理员才能批量编辑公共图库");
+            }
+        } else {
+            // 场景 B：私有空间批量编辑 -> 校验空间存在性与所属权（保留你原本的逻辑）
+            Space space = spaceService.getById(spaceId);
+            ThrowUtils.throwIf(space == null, ErrorCode.NOT_FOUND_ERROR, "空间不存在");
+            if (!space.getUserId().equals(loginUser.getId())) {
+                throw new BusinessException(ErrorCode.NO_AUTH_ERROR, "没有空间访问权限");
+            }
         }
-        // 3. 查询指定图片（仅选择需要的字段）
-        List<Picture> pictureList = this.lambdaQuery()
+        // =========================================================================
+
+        // 2. 查询指定图片（仅选择需要的字段）
+        // ==================== 【关键改动 2：动态构建查询条件】====================
+        // 如果是公共图库，图片表中的 spaceId 字段通常为 null 或者是 0，这里需要动态适配
+        var queryWrapper = this.lambdaQuery()
                 .select(Picture::getId, Picture::getSpaceId)
-                .eq(Picture::getSpaceId, spaceId)
-                .in(Picture::getId, pictureIdList)
-                .list();
+                .in(Picture::getId, pictureIdList);
+
+        if (spaceId == null) {
+            // 公共图库：查询 spaceId 为空或为 0 的记录（根据你数据库设计选择 isNull 或 eq(0)）
+            queryWrapper.isNull(Picture::getSpaceId);
+        } else {
+            // 私有空间：严格限制为当前空间下的图片，防止越权操作别处的图片
+            queryWrapper.eq(Picture::getSpaceId, spaceId);
+        }
+
+        List<Picture> pictureList = queryWrapper.list();
+        // =========================================================================
+
         if (pictureList.isEmpty()) {
             return;
         }
@@ -697,25 +743,86 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
     }
 
     /**
+     * 创建扩图任务
+     *
+     * @param createPictureOutPaintingTaskRequest
+     * @param loginUser
+     * @return
+     */
+    @Override
+    public CreateOutPaintingTaskResponse createPictureOutPaintingTask(CreatePictureOutPaintingTaskRequest createPictureOutPaintingTaskRequest, User loginUser) {
+        // 获取图片信息
+        Long pictureId = createPictureOutPaintingTaskRequest.getPictureId();
+        Picture picture = Optional.ofNullable(this.getById(pictureId))
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND_ERROR, "图片不存在"));
+        // 校验权限
+        checkPictureAuth(loginUser, picture);
+
+
+        // 创建扩图任务
+        CreateOutPaintingTaskRequest createOutPaintingTaskRequest = new CreateOutPaintingTaskRequest();
+        CreateOutPaintingTaskRequest.Input input = new CreateOutPaintingTaskRequest.Input();
+        input.setImageUrl(picture.getUrl());
+        createOutPaintingTaskRequest.setInput(input);
+        createOutPaintingTaskRequest.setParameters(createPictureOutPaintingTaskRequest.getParameters());
+        // 创建任务
+        return aliYunAiApi.createOutPaintingTask(createOutPaintingTaskRequest);
+    }
+
+    /**
      * nameRule 格式：图片{序号}
      *
      * @param pictureList
      * @param nameRule
      */
+//    private void fillPictureWithNameRule(List<Picture> pictureList, String nameRule) {
+//        if (StrUtil.isBlank(nameRule) || CollUtil.isEmpty(pictureList)) {
+//            return;
+//        }
+//        long count = 1;
+//        try {
+//            for (Picture picture : pictureList) {
+//                String pictureName = nameRule.replaceAll("\\{序号}", String.valueOf(count++));
+//                picture.setName(pictureName);
+//            }
+//        } catch (Exception e) {
+//            log.error("名称解析错误", e);
+//            throw new BusinessException(ErrorCode.OPERATION_ERROR, "名称解析错误");
+//        }
+//    }
     private void fillPictureWithNameRule(List<Picture> pictureList, String nameRule) {
         if (StrUtil.isBlank(nameRule) || CollUtil.isEmpty(pictureList)) {
             return;
         }
         long count = 1;
         try {
+            // ✨ 【新加优化】：提前获取当前日期字符串（比如 20260615），避免在循环里重复创建对象影响性能
+            String currentDate = dayjsLikeFormat(); // 或者使用标准 Java 写法：
+            // String currentDate = cn.hutool.core.date.DateUtil.format(new java.util.Date(), "yyyyMMdd");
+
             for (Picture picture : pictureList) {
+                // 1. 处理 {序号}
                 String pictureName = nameRule.replaceAll("\\{序号}", String.valueOf(count++));
+
+
+                // 2. ✨ 【新加替换】：处理 {当前日期}
+                pictureName = pictureName.replaceAll("\\{当前日期}", currentDate);
+
+
+                // 最后将拼装好的新名字塞回对象中
                 picture.setName(pictureName);
             }
         } catch (Exception e) {
             log.error("名称解析错误", e);
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "名称解析错误");
         }
+    }
+
+    /**
+     * 辅助方法：获取当前日期 yyyyMMdd 格式
+     */
+    private String dayjsLikeFormat() {
+        return java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"));
     }
 }
 
