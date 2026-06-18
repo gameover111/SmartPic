@@ -13,6 +13,7 @@ import com.hsc.hsmartpicbackend.constant.UserConstant;
 import com.hsc.hsmartpicbackend.exception.BusinessException;
 import com.hsc.hsmartpicbackend.exception.ErrorCode;
 import com.hsc.hsmartpicbackend.exception.ThrowUtils;
+import com.hsc.hsmartpicbackend.manager.auth.SpaceUserAuthManager;
 import com.hsc.hsmartpicbackend.model.dto.space.*;
 import com.hsc.hsmartpicbackend.model.entity.Space;
 import com.hsc.hsmartpicbackend.model.entity.User;
@@ -50,6 +51,9 @@ public class SpaceController {
 
     @Resource
     private SpaceService spaceService;
+
+    @Resource
+    private SpaceUserAuthManager spaceUserAuthManager;
 
     @PostMapping("/add")
     public BaseResponse<Long> addSpace(@RequestBody SpaceAddRequest spaceAddRequest, HttpServletRequest request) {
@@ -145,8 +149,13 @@ public class SpaceController {
         // 查询数据库
         Space space = spaceService.getById(id);
         ThrowUtils.throwIf(space == null, ErrorCode.NOT_FOUND_ERROR);
+
+        SpaceVO spaceVO = spaceService.getSpaceVO(space, request);
+        User loginUser = userService.getLoginUser(request);
+        List<String> permissionList = spaceUserAuthManager.getPermissionList(space, loginUser);
+        spaceVO.setPermissionList(permissionList);
         // 获取封装类
-        return ResultUtils.success(spaceService.getSpaceVO(space, request));
+        return ResultUtils.success(spaceVO);
     }
 
     /**

@@ -75,9 +75,9 @@ public class Space implements Serializable {
     @TableLogic
     private Integer isDelete;
     /**
-     * 空间类型
+     * 空间类型：0-私有 1-团队
      */
-    private String spaceType;
+    private Integer spaceType;
 
     private static final long serialVersionUID = -296399332542865793L;
 }
