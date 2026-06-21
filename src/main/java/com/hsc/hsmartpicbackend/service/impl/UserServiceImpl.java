@@ -10,6 +10,7 @@ import com.hsc.hsmartpicbackend.constant.UserConstant;
 import com.hsc.hsmartpicbackend.exception.BusinessException;
 import com.hsc.hsmartpicbackend.exception.ErrorCode;
 import com.hsc.hsmartpicbackend.manager.auth.StpKit;
+import com.hsc.hsmartpicbackend.model.dto.user.UserEditRequest;
 import com.hsc.hsmartpicbackend.model.dto.user.UserQueryRequest;
 import com.hsc.hsmartpicbackend.model.entity.User;
 import com.hsc.hsmartpicbackend.model.enums.UserRoleEnum;
@@ -224,6 +225,33 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
                     .orderBy(StrUtil.isNotEmpty(sortField), sortOrder.equals("ascend"), sortField);
         return queryWrapper;
     }
+    /**
+     * 用户编辑个人信息
+     *
+     * @param userEditRequest 编辑请求
+     * @param request         HTTP 请求
+     * @return 是否成功
+     */
+    @Override
+    public boolean userEdit(UserEditRequest userEditRequest, HttpServletRequest request) {
+        // 获取当前登录用户
+        User loginUser = getLoginUser(request);
+        // 只允许修改是昵称、头像、简介，不能修改角色等敏感信息
+        User user = new User();
+        user.setId(loginUser.getId());
+        user.setUserName(userEditRequest.getUserName());
+        user.setUserAvatar(userEditRequest.getUserAvatar());
+        user.setUserProfile(userEditRequest.getUserProfile());
+        boolean result = this.updateById(user);
+        if (!result) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "用户信息更新失败");
+        }
+        // 同步更新 Session 中的用户信息
+        User updatedUser = this.getById(loginUser.getId());
+        request.getSession().setAttribute(UserConstant.USER_LOGIN_STATE, updatedUser);
+        return true;
+    }
+
     /**
      * 判断用户是否为管理员
      *

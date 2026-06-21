@@ -10,7 +10,8 @@ spring:
   application:
     name: h-smartpic-backend
   profiles:
-    active: local
+#    active: local
+    active: prod
   #  数据库 配置
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver

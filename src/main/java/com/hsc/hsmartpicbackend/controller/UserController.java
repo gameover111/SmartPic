@@ -74,6 +74,16 @@ public class UserController {
     }
 
     /**
+     * 用户编辑个人信息
+     */
+    @PostMapping("/edit")
+    public BaseResponse<Boolean> editUser(@RequestBody UserEditRequest userEditRequest, HttpServletRequest request) {
+        ThrowUtils.throwIf(userEditRequest == null, ErrorCode.PARAMS_ERROR);
+        boolean result = userService.userEdit(userEditRequest, request);
+        return ResultUtils.success(result);
+    }
+
+    /**
      * 创建用户
      */
     @PostMapping("/add")

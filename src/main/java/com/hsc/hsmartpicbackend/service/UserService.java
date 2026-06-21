@@ -1,6 +1,7 @@
 package com.hsc.hsmartpicbackend.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.hsc.hsmartpicbackend.model.dto.user.UserEditRequest;
 import com.hsc.hsmartpicbackend.model.dto.user.UserQueryRequest;
 import com.hsc.hsmartpicbackend.model.entity.User;
 import com.baomidou.mybatisplus.extension.service.IService;
@@ -92,6 +93,15 @@ public interface UserService extends IService<User> {
      * @return
      */
     QueryWrapper<User> getQueryWrapper(UserQueryRequest userQueryRequest);
+
+    /**
+     * 用户编辑个人信息
+     *
+     * @param userEditRequest 编辑请求
+     * @param request         HTTP 请求
+     * @return 是否成功
+     */
+    boolean userEdit(UserEditRequest userEditRequest, HttpServletRequest request);
 
     /**
      * 判断用户是否为管理员

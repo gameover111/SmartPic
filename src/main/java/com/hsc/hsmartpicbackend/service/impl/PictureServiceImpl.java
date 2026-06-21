@@ -15,6 +15,7 @@ import com.hsc.hsmartpicbackend.exception.ErrorCode;
 import com.hsc.hsmartpicbackend.exception.ThrowUtils;
 import com.hsc.hsmartpicbackend.manager.CosManager;
 import com.hsc.hsmartpicbackend.manager.FileManager;
+import com.hsc.hsmartpicbackend.manager.MultilevelCacheManager;
 import com.hsc.hsmartpicbackend.manager.upload.FilePictureUpload;
 import com.hsc.hsmartpicbackend.manager.upload.PictureUploadTemplate;
 import com.hsc.hsmartpicbackend.manager.upload.UrlPictureUpload;
@@ -87,6 +88,13 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
 
     @Resource
     private AliYunAiApi aliYunAiApi;
+
+    @Resource
+    private MultilevelCacheManager multilevelCacheManager;
+
+    // 图片列表缓存前缀（与 PictureController 中保持一致）
+    private static final String PICTURE_LIST_CACHE_PREFIX = "h-smartpic:listPictureVOByPage:";
+
     /**
      * 校验图片
      * @param picture 图片
@@ -419,6 +427,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         updatePicture.setReviewTime(new Date());
         boolean result = this.updateById(updatePicture);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        // 清除图片列表缓存，让首页立即生效
+        multilevelCacheManager.evictByPrefix(PICTURE_LIST_CACHE_PREFIX);
     }
 
     /**
@@ -582,6 +592,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         });
         // 异步清理文件
         this.clearPictureFile(oldPicture);
+        // 清除图片列表缓存
+        multilevelCacheManager.evictByPrefix(PICTURE_LIST_CACHE_PREFIX);
     }
 
     @Override
@@ -606,6 +618,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         // 操作数据库
         boolean result = this.updateById(picture);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR);
+        // 清除图片列表缓存
+        multilevelCacheManager.evictByPrefix(PICTURE_LIST_CACHE_PREFIX);
     }
 
     @Override
@@ -747,6 +761,8 @@ public class PictureServiceImpl extends ServiceImpl<PictureMapper, Picture>
         // 5. 操作数据库进行批量更新
         boolean result = this.updateBatchById(pictureList);
         ThrowUtils.throwIf(!result, ErrorCode.OPERATION_ERROR, "批量编辑失败");
+        // 清除图片列表缓存
+        multilevelCacheManager.evictByPrefix(PICTURE_LIST_CACHE_PREFIX);
     }
 
     /**

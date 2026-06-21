@@ -8,6 +8,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.Resource;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
@@ -66,5 +67,24 @@ public class MultilevelCacheManager {
     public void evict(String key) {
         localCache.invalidate(key);
         stringRedisTemplate.delete(key);
+    }
+
+    /**
+     * 批量清除所有以 cachePrefix 开头的缓存
+     * 用于审核/删除/编辑图片后清除首页缓存
+     * @param cachePrefix 缓存前缀，例如 "h-smartpic:listPictureVOByPage:"
+     */
+    public void evictByPrefix(String cachePrefix) {
+        // 清除本地缓存（遍历所有 key）
+        localCache.asMap().keySet().forEach(key -> {
+            if (key.startsWith(cachePrefix)) {
+                localCache.invalidate(key);
+            }
+        });
+        // 清除 Redis 缓存（支持通配符删除）
+        Set<String> keys = stringRedisTemplate.keys(cachePrefix + "*");
+        if (keys != null && !keys.isEmpty()) {
+            stringRedisTemplate.delete(keys);
+        }
     }
 }
